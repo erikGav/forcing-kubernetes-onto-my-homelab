@@ -2,7 +2,7 @@
 
 In [my last article](https://medium.com/@work.erik.gavrilov/what-i-learned-running-a-homelab-like-a-startup-08a86598a93a) I wrote that everyone knows what their tools do, and not everyone knows the moment to reach for them. This one turns that on me.
 
-> "Why do you need a better tool for a simple job? It's like reaching for a chainsaw to cut a piece of wood when a hand saw would do the job fine."
+*Why do you need a better tool for a simple job? It's like reaching for a chainsaw to cut a piece of wood when a hand saw would do the job fine.*
 
 A chainsaw is absurd on one plank and the only sane choice on a cord of firewood. The question is where it flips. I had never had to answer that for Kubernetes. Nothing I run has ever been big enough to force it, so I forced it. I took the `apps` stack from my NUC, 95 lines of Compose running five services, and rebuilt it on Kubernetes. Then I measured what that cost. Line counts, boot times, failure behavior, memory at idle.
 
