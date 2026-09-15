@@ -1,10 +1,10 @@
 # Forcing Kubernetes Onto My Homelab
 
-In my last article I wrote that everyone knows what their tools do, and not everyone knows the moment to reach for them. This one points that at me.
+In my last article I wrote that everyone knows what their tools do, and not everyone knows the moment to reach for them. This one turns that on me.
 
 > "Why do you need a better tool for a simple job? It's like reaching for a chainsaw to cut a piece of wood when a hand saw would do the job fine."
 
-A chainsaw is absurd on one plank and the only sane choice on a cord of firewood. The question is where it flips. I had never had to answer that for Kubernetes. Nothing I run has ever been big enough to force it, so I forced it. I took the `apps` stack from my NUC, 95 lines of Compose running five services, and rebuilt it on Kubernetes. Then I measured what that cost. Line counts, boot times, failure behaviour, memory at idle.
+A chainsaw is absurd on one plank and the only sane choice on a cord of firewood. The question is where it flips. I had never had to answer that for Kubernetes. Nothing I run has ever been big enough to force it, so I forced it. I took the `apps` stack from my NUC, 95 lines of Compose running five services, and rebuilt it on Kubernetes. Then I measured what that cost. Line counts, boot times, failure behavior, memory at idle.
 
 This ran on a second machine with the same data layout, not on the live server. Every number below comes from that cluster.
 
@@ -135,7 +135,7 @@ The cluster had to be something a business would run in production. Run the expe
 
 Weight was never my objection to **kubeadm**. Three control-plane components plus etcd run fine on a NUC. Reversibility was. `kubeadm reset` leaves CNI config in `/etc/cni/net.d`, iptables and ipvs rules, and kubelet state behind, then prints instructions telling you to clear the rest yourself. That machine already has a job.
 
-I kept **k3s**. Install is one command, uninstall is `/usr/local/bin/k3s-uninstall.sh`, and the installer writes that script for you. One binary carries the server, the agent and containerd. It's a CNCF-certified Kubernetes distribution, which is what makes the numbers worth reading: same API, different packaging, so what bites here bites on a cluster someone pays for. The cluster below is v1.36.3+k3s1 on one node.
+I kept **k3s**. Install is one command, uninstall is `/usr/local/bin/k3s-uninstall.sh`, and the installer writes that script for you. One binary carries the server, the agent, and containerd. It's a CNCF-certified Kubernetes distribution, which is what makes the numbers worth reading: same API, different packaging, so what bites here bites on a cluster someone pays for. The cluster below is v1.36.3+k3s1 on one node.
 
 ## The defaults k3s ships
 
@@ -161,7 +161,7 @@ kind ships the storage class too, the same local-path provisioner. The other thr
 
 That's convenience, and it's also the part to argue with, because two of those defaults are substitutes rather than equivalents.
 
-klipper-lb, the component that handed Traefik `192.168.1.4`, is a DaemonSet that intercepts the port on the host and forwards it. The address is the node's own IP, so it lasts exactly as long as the node does, and no health check anywhere in that path can move traffic off it.
+klipper-lb, the component that handed Traefik `192.168.1.4`, is a DaemonSet, one pod per node, that intercepts the port on the host and forwards it. The address is the node's own IP, so it lasts exactly as long as the node does, and no health check anywhere in that path can move traffic off it.
 
 local-path writes into `/var/lib/rancher/k3s/storage` on whichever node ran the pod first, which is why its binding mode is `WaitForFirstConsumer`:
 
@@ -189,7 +189,7 @@ Nothing gets migrated until every line has a known destination. Heimdall's defin
 | `command:` | `args:` | Kubernetes `command` is ENTRYPOINT, not CMD |
 | `ulimits:` | nothing | no equivalent field exists |
 
-Three of those rows deserve more than a row.
+Four of those rows deserve more than a row.
 
 `restart: unless-stopped` has no target because a Deployment doesn't offer the choice. The API says so:
 
@@ -198,7 +198,9 @@ $ kubectl apply --dry-run=server -f deploy-with-onfailure.yaml
 spec.template.spec.restartPolicy: Unsupported value: "OnFailure": supported values: "Always"
 ```
 
-Compose gives four restart policies. A Deployment gives one. The line isn't translated, it's deleted, and the behaviour it described becomes non-negotiable.
+Compose gives four restart policies. A Deployment gives one. The line isn't translated, it's deleted, and the behavior it described becomes non-negotiable.
+
+`healthcheck:` becomes three probes, and only one of them decides anything about traffic. `startupProbe` holds the other two off while a slow container boots. `livenessProbe` restarts the container when it stops answering. `readinessProbe` is the one that matters for a deploy: a pod failing it stays running, but the Service takes it out of the endpoint list, so nothing routes to it. Compose marks a container unhealthy and leaves it in place. That difference is the whole basis of the rolling update further down.
 
 `command:` looks like it maps to `command:`, and that's the trap. In Kubernetes, `command` overrides the image's ENTRYPOINT and `args` overrides its CMD. Compose's `command` is CMD. Gollum's `command: ["-c", "/wiki/gollum.rb"]` has to become `args:`, and writing it as `command:` replaces the entrypoint instead of passing arguments to it. The container starts and does the wrong thing rather than failing, which is the worst way for a mistake to behave.
 
@@ -209,7 +211,7 @@ $ kubectl explain pod.spec --recursive | grep -ci ulimit
 0
 ```
 
-There's no pod-level or container-level ulimit field. Getting that behaviour back means node configuration or a privileged init container, which is more machinery than one line of YAML was worth. I dropped it.
+There's no pod-level or container-level ulimit field. Getting that behavior back means node configuration or a privileged init container, which is more machinery than one line of YAML was worth. I dropped it.
 
 Compose has one noun. Kubernetes splits it into six, and four of them are unreachable on one machine: a DaemonSet places one pod per node, a StatefulSet gives each replica its own volume, and Job and CronJob replace `docker run --rm` under host cron. What's left is a Pod, which nobody writes by hand, and a Deployment, which is the object that has to justify all of it.
 
@@ -222,9 +224,9 @@ volumes:
 
 A host path, a container path, a colon. Kubernetes has four ways to say that, and picking between them is the first decision in this migration that can lose data.
 
-`hostPath` is the literal translation, eight lines instead of one, identical behaviour. Its `type` field is the part that matters: `Directory` refuses to start if the path is missing, `DirectoryOrCreate` makes an empty one and starts anyway, and the default `""` checks nothing. A pod that comes up healthy while serving an empty config directory is a specific kind of bad morning.
+`hostPath` is the literal translation, eight lines instead of one, identical behavior. Its `type` field is the part that matters: `Directory` refuses to start if the path is missing, `DirectoryOrCreate` makes an empty one and starts anyway, and the default `""` checks nothing. A pod that comes up healthy while serving an empty config directory is a specific kind of bad morning.
 
-A `local` PersistentVolume is the same path with the abstraction on top: a PV pointing at the existing directory, a PVC bound to it by name, and `storageClassName: ""` on both so the default provisioner keeps its hands off. The API refuses to accept it without a scheduling rule:
+A `local` PersistentVolume is the same path with the abstraction on top: a PV pointing at the existing directory, a PVC bound to it by name, and `storageClassName: ""` on both so the default provisioner keeps its hands off. Its reclaim policy defaults to `Retain`, which leaves the directory on disk when the claim goes away. The API refuses to accept it without a scheduling rule:
 
 ```
 $ kubectl apply --dry-run=server -f pv-without-affinity.yaml
@@ -242,7 +244,7 @@ Delete
 
 Deleting the claim deletes the directory. `docker compose down` never touched a bind mount, and removing named volumes took an explicit `-v`. The safety default is inverted here, and the object that triggers it is one people delete casually while iterating.
 
-The fourth option, NFS or a CSI driver, is the only one that survives a second node, and it's a service to run and back up before it holds a single file. I went with `local` PV plus PVC across all six volumes. Counting the PV, the claim, the `volumes` block and the `volumeMounts` entry, that's 37 lines to say what Compose said in one. qBittorrent has three volumes, so it pays that three times. The read-only mount is the only thing in the whole migration that got shorter: `:ro` became `readOnly: true`.
+The fourth option, NFS or a CSI driver, is the only one that survives a second node, and it's a service to run and to back up before it holds a single file. I went with `local` PV plus PVC across all six volumes. Counting the PV, the claim, the `volumes` block, and the `volumeMounts` entry, that's 37 lines to say what Compose said in one. qBittorrent has three volumes, so it pays that three times. The read-only mount is the only thing in the whole migration that got shorter: `:ro` became `readOnly: true`.
 
 Fair test of whether the paperwork bought anything: I deleted every object in the namespace and reapplied. All six directories were still on disk, all five pods came back with their data. `Retain` did what it says.
 
@@ -290,7 +292,7 @@ bentopdf-786dd77dc6-hfptc   0/1   ErrImagePull   0   32s
 
 Thirty out of thirty. The new pod never became ready, so it never received traffic, and the old one kept serving the whole time. That's the feature working as advertised, on the one app in the stack that can use it.
 
-Then Heimdall, same broken change. Heimdall has a `ReadWriteOnce` config volume, which means old and new pods can't hold it at once, which forces `strategy: Recreate`:
+Then Heimdall, same broken change. Heimdall has a `ReadWriteOnce` config volume. Old and new pods can't hold it at once, which forces `strategy: Recreate`:
 
 ```
   t+1: 502   t+2: 502   t+3: 502
@@ -347,11 +349,9 @@ convertx-55959957d9-nhz6v   0/1   OOMKilled   1 (2s ago)   3s
 
 The part Compose doesn't have is `requests`, and requests are input to the scheduler. On one node the scheduler has one answer to every question, so what the limits got me was the ability to OOM my own container in a new file format.
 
-One more thing worth knowing before you trust `helm upgrade` as a reset button. After I set that limit with `kubectl set resources`, running `helm upgrade` against the unchanged chart did not remove it. The live object kept the field, and I had to patch the Deployment directly. Helm reconciles what's in the chart; it doesn't notice what you added by hand.
-
 ## The same five services as a Helm chart
 
-The five services are 95 lines of Compose. As hand-written manifests they're 642 lines across six files and 29 objects. That's 6.8 times the lines, and it's the worst case, because almost all of it is the same shape written out five times.
+The five services are 95 lines of Compose. I wrote them out as plain manifests first, to get a number rather than an impression, and only excerpts of those files appear above: 642 lines across six files and 29 objects. That's 6.8 times the lines, and it's the worst case, because almost all of it is the same shape written out five times.
 
 So I collapsed it into a Helm chart: one template that loops over a map of apps, and a values file that describes each app in the shape the Compose file did.
 
@@ -365,6 +365,8 @@ templates/app.yaml  157 lines
 
 216 hand-written lines against 642. A sixth app costs 4 lines in `values.yaml` if it's stateless like BentoPDF and 16 if it looks like qBittorrent, against the 63 and 224 those two took as hand-written files. Against the Compose file it's still 2.3 times bigger, and the template itself is a different job from writing YAML; conditionals like `{{ if $app.volumes }}Recreate{{ else }}RollingUpdate{{ end }}` are code, and they fail like code. The chart deployed all five apps and had every hostname answering 10 seconds later.
 
+One more thing worth knowing before you trust `helm upgrade` as a reset button. The 32Mi limit I put on ConvertX with `kubectl set resources` survived a `helm upgrade` against the unchanged chart. The live object kept the field, and I had to patch the Deployment directly. Helm reconciles what's in the chart; it doesn't notice what you added by hand.
+
 ## What the cluster costs while idle
 
 ```
@@ -372,7 +374,7 @@ templates/app.yaml  157 lines
  70.4 MB   /usr/bin/dockerd
 ```
 
-Six running pods in `kube-system`, 98 Mi between them, hold up five application pods using 491 Mi: CoreDNS, Traefik, metrics-server, the local-path provisioner and two klipper-lb DaemonSet pods. Two more completed Helm jobs sit there as the record of how Traefik got installed.
+Six running pods in `kube-system`, 98 Mi between them, hold up five application pods using 491 Mi: CoreDNS, Traefik, metrics-server, the local-path provisioner, and two klipper-lb DaemonSet pods. Two more completed Helm jobs sit there as the record of how Traefik got installed.
 
 Startup and teardown, measured the same way on the same hardware, from command to every service answering HTTP:
 
@@ -396,7 +398,7 @@ The threshold isn't a container count. Every one of those wins turns on a specif
 
 **A second machine.** Three of the four storage options are pinned to one node and the fourth costs a fileserver. Everything Kubernetes does that Compose can't starts existing once there's somewhere else to schedule to: a pod that outlives the machine under it, a rolling update with room to run both copies at once, a scheduler with more than one answer.
 
-**Apps that can run more than one replica.** Heimdall, qBittorrent and ConvertX each own one writable config directory, so the replica count is pinned at 1 and `Recreate` is forced. Stateless services get rolling updates; stateful ones get the same downtime Compose gives, plus the YAML.
+**Apps that can run more than one replica.** Heimdall, qBittorrent, and ConvertX each own one writable config directory, so the replica count is pinned at 1 and `Recreate` is forced. Stateless services get rolling updates; stateful ones get the same downtime Compose gives, plus the YAML.
 
 **Deploys frequent enough that you roll one back.** The eight seconds is a saving per rollback, not per deploy, and my test flattered it. Every image in the compose file is `:latest`, and the API server gives `:latest` a pull policy of `Always`:
 
@@ -413,6 +415,8 @@ lscr.io/linuxserver/heimdall:1.0.0   -> imagePullPolicy=IfNotPresent
 None of those four is true of one NUC that I administer alone. Two of them go true the day I add a second machine. So the chainsaw was never too much tool. It's the right tool for a job I don't have yet, and the hand saw is getting through the one plank in front of it.
 
 ## What it cost against what it gave
+
+Everything measured above, side by side.
 
 | | Docker Compose | k3s |
 |---|---|---|
