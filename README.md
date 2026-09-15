@@ -1,6 +1,6 @@
 # Forcing Kubernetes Onto My Homelab
 
-In my last article I wrote that everyone knows what their tools do, and not everyone knows the moment to reach for them. This one turns that on me.
+In [my last article](https://medium.com/@work.erik.gavrilov/what-i-learned-running-a-homelab-like-a-startup-08a86598a93a) I wrote that everyone knows what their tools do, and not everyone knows the moment to reach for them. This one turns that on me.
 
 > "Why do you need a better tool for a simple job? It's like reaching for a chainsaw to cut a piece of wood when a hand saw would do the job fine."
 
